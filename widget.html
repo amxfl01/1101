@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <style>
+        /* ... (CSS 코드는 여기에 붙여넣습니다) ... */
+        body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto; padding: 10px; color: #111; max-width: 300px; }
+        .widget-box { border: 1px solid #e0e0e0; border-radius: 12px; padding: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        /* ... (나머지 CSS) ... */
+        .cell[data-color="blue"]{ background: #cfe8ff; } 
+        /* ... (나머지 CSS) ... */
+    </style>
+</head>
+<body>
+    <div class="widget-box">
+        <div class="month-display" id="monthDisplay"></div>
+        <div class="today-label" id="todayLabel">♡ TODAY IS <span style="font-size:18px;">.</span></div>
+        <div class="calendar-grid" id="dowRow">
+            <div class="dow">Mo</div><div class="dow">Tu</div><div class="dow">We</div><div class="dow">Th</div><div class="dow">Fr</div><div class="dow">Sa</div><div class="dow">Su</div>
+        </div> 
+        <div class="calendar-grid" id="calendarGrid"></div> 
+        <button class="add-btn" id="addBtn">—<span class="symbol">✦</span>ADD ENTRY<span class="symbol">✦</span>—</button>
+    </div>
+    
+    <script>
+        // 클라이언트 측 설정
+        let NOTION_TOKEN;
+        let NOTION_DB_ID;
+        const today = new Date(); // 오늘 날짜 객체 정의
+
+        // ------------------ 토큰 및 DB ID 로드 (로컬 전용) ------------------
+        function getAuthParams() {
+            // 먼저 URL 해시에서 로드 시도 (setup.html에서 넘어올 때)
+            const hash = window.location.hash.substring(1);
+            if (hash) {
+                const params = new URLSearchParams(hash);
+                NOTION_TOKEN = params.get('token');
+                NOTION_DB_ID = params.get('db');
+                
+                // LocalStorage에 저장 (다음 접속 시 자동 로드)
+                if (NOTION_TOKEN && NOTION_DB_ID) {
+                    try {
+                        localStorage.setItem('notion_token', NOTION_TOKEN);
+                        localStorage.setItem('notion_db_id', NOTION_DB_ID);
+                        // URL에서 해시 제거 (보안 - 히스토리에 남지 않도록)
+                        window.history.replaceState(null, '', window.location.pathname);
+                    } catch (e) {
+                        console.warn('LocalStorage 저장 실패:', e);
+                    }
+                }
+            } else {
+                // LocalStorage에서 로드 시도
+                try {
+                    NOTION_TOKEN = localStorage.getItem('notion_token');
+                    NOTION_DB_ID = localStorage.getItem('notion_db_id');
+                } catch (e) {
+                    console.warn('LocalStorage 읽기 실패:', e);
+                }
+            }
+            
+            // 설정 정보가 없으면 setup.html로 이동
+            if (!NOTION_TOKEN || !NOTION_DB_ID) {
+                alert('설정 정보가 누락되었습니다. setup.html로 이동하여 설정해주세요.');
+                window.location.href = 'setup.html';
+                return false;
+            }
+            
+            return true;
+        }
+
+        // ------------------ Notion API 호출 함수 (Serverless Function 사용) ------------------
+        async function callNotionApi(endpoint, method = 'GET', body = null) {
+            // Serverless Function 경로
+            const API_ENDPOINT = '/api/notion-proxy';
+            
+            try {
+                const response = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        endpoint: endpoint,
+                        method: method,
+                        body: body,
+                        userToken: NOTION_TOKEN
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    console.error('Notion API Error:', response.status, errorData);
+                    
+                    // 401 오류는 토큰 문제
+                    if (response.status === 401) {
+                        alert('토큰이 유효하지 않습니다.\nsetup.html에서 다시 설정해주세요.');
+                    } else if (response.status === 500) {
+                        alert(`서버 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.`);
+                    } else {
+                        alert(`API 통신 오류: ${response.status} (${errorData.code || 'unknown'}).\n권한 설정을 확인하세요!`);
+                    }
+                    throw new Error(`API 호출 실패: ${response.status}`);
+                }
+                
+                return response.json();
+            } catch (error) {
+                console.error("Fetch Error:", error);
+                if (error.message.includes('Failed to fetch')) {
+                    alert('서버에 연결할 수 없습니다.\n네트워크 연결을 확인해주세요.');
+                }
+                return null;
+            }
+        }
+        
+        // ------------------ 위젯 핵심 로직 (이전 답변에서 제공된 함수 정의) ------------------
+        
+        let displayYear = (new Date()).getFullYear();
+        let displayMonth = (new Date()).getMonth() + 1; 
+
+        // DOM 요소 정의
+        const monthDisplay = document.getElementById('monthDisplay');
+        const todayLabel = document.getElementById('todayLabel');
+        const addBtn = document.getElementById('addBtn');
+        const calendarGrid = document.getElementById('calendarGrid');
+        
+        // --- updateTodayLabel 함수 (날짜 표시 형식) ---
+        function updateTodayLabel() {
+            const month = today.toLocaleString('en-US', { month: 'numeric' });
+            const day = today.getDate();
+            const weekday = today.toLocaleString('en-US', { weekday: 'short' }).toUpperCase();
+            
+            const finalDateString = `${month}/ ${day}/ ${weekday}`;
+            
+            // 공백을 추가하여 TODAY IS와 날짜를 분리
+            todayLabel.innerHTML = `♡ TODAY IS &nbsp;${finalDateString}`; 
+        }
+
+        // --- addEntry 함수 (페이지 생성 API 호출) ---
+        async function addEntry() {
+            addBtn.disabled = true; 
+            addBtn.textContent = '...ADDING';
+
+            const payload = {
+                parent: { database_id: NOTION_DB_ID },
+                properties: {
+                    'Name': { title: [{ text: { content: `오늘의 기록 (${today.toLocaleDateString('ko-KR')})` } }] },
+                    'Date': { date: { start: new Date().toISOString() } },
+                    'Color': { select: { name: 'blue' } } 
+                }
+            };
+            
+            const data = await callNotionApi('/pages', 'POST', payload); 
+            
+            addBtn.disabled = false;
+            addBtn.innerHTML = `—<span class="symbol">✦</span>ADD ENTRY<span class="symbol">✦</span>—`;
+
+            if (data && data.id) {
+                const pageId = data.id.replace(/-/g,'');
+                window.open(`https://www.notion.so/${pageId}`, '_blank');
+                setTimeout(loadCalendar, 800); 
+            }
+        } 
+        
+        addBtn.addEventListener('click', addEntry);
+
+        // --- loadCalendar 함수 (데이터 조회 API 호출) ---
+        async function loadCalendar(){
+            const monthNames = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+            monthDisplay.innerHTML = `📅 °•.✦.••• ${monthNames[displayMonth - 1]}`; 
+            
+            const start = new Date(displayYear, displayMonth - 1, 1).toISOString().slice(0, 10);
+            const end = new Date(displayYear, displayMonth, 0).toISOString().slice(0, 10);
+            
+            const payload = {
+                filter: {
+                    and: [
+                        { property: 'Date', date: { on_or_after: start } },
+                        { property: 'Date', date: { on_or_before: end } }
+                    ]
+                },
+                page_size: 100
+            };
+            
+            // 데이터베이스 쿼리는 POST 메서드를 사용
+            const data = await callNotionApi(`/databases/${NOTION_DB_ID}/query`, 'POST', payload); 
+            const items = (data && data.results) ? data.results : [];
+
+            const dayMap = {};
+            items.forEach(p => {
+                const dateProp = p.properties['Date']?.date?.start || null;
+                const color = p.properties['Color']?.select?.name || null;
+                
+                if(dateProp){
+                    const d = new Date(dateProp);
+                    const day = d.getDate(); 
+                    dayMap[day] = { id: p.id, date: dateProp, color: color || null };
+                }
+            });
+
+            renderGrid(displayYear, displayMonth, dayMap);
+            updateTodayLabel();
+        }
+
+        // --- renderGrid 함수 (HTML 렌더링 로직) ---
+        function renderGrid(year, month, dayMap){
+            const grid = document.getElementById('calendarGrid');
+            grid.innerHTML = '';
+            
+            const first = new Date(year, month-1, 1);
+            const jsWeekday = first.getDay(); 
+            const startIndex = (jsWeekday + 6) % 7; 
+
+            const daysInMonth = new Date(year, month, 0).getDate();
+            const currentDay = (year === today.getFullYear() && month === today.getMonth() + 1) ? today.getDate() : -1;
+
+            for(let i=0;i<startIndex;i++){
+                const el = document.createElement('div');
+                el.className = 'cell empty';
+                grid.appendChild(el);
+            }
+            
+            for(let day=1; day<=daysInMonth; day++){
+                const el = document.createElement('div');
+                el.className = 'cell';
+                el.textContent = day;
+
+                if (day === currentDay) {
+                    el.classList.add('is-today');
+                }
+                
+                if(dayMap[day] && dayMap[day].color){
+                    el.setAttribute('data-color', dayMap[day].color); 
+                    el.title = `기록 완료: ${dayMap[day].color}`;
+                    el.addEventListener('click', () => {
+                        const pageId = dayMap[day].id.replace(/-/g,'');
+                        window.open(`https://www.notion.so/${pageId}`, '_blank');
+                    });
+                }
+                grid.appendChild(el);
+            }
+
+            const totalCells = startIndex + daysInMonth;
+            const remaining = (42 - totalCells) % 7; 
+            for(let i=0; i<remaining; i++){
+                const el = document.createElement('div');
+                el.className = 'cell empty';
+                grid.appendChild(el);
+            }
+        } 
+
+        // 초기 실행
+        if (getAuthParams()) {
+            loadCalendar();
+        }
+    </script>
+</body>
+</html>

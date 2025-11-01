@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <title>Notion 캘린더 위젯 설정</title>
+    <style>
+        body { font-family: Inter, sans-serif; padding: 40px; background: #f7f7f7; text-align: center; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        input { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
+        label { display: block; text-align: left; margin-bottom: 5px; font-weight: 600; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 700; }
+        p { text-align: left; font-size: 14px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Notion 캘린더 위젯 설정</h2>
+        <p>⚠️ 이 방식은 토큰을 브라우저에 노출합니다. 보안에 민감하다면, 서버 기반 배포(B 방식)를 권장합니다. (토큰 재발급 후 사용)</p>
+        
+        <label for="token">Notion Secret Token (secret_...)</label>
+        <input type="text" id="token" placeholder="Notion Integration Secret Token" required>
+        
+        <label for="dbId">Notion Database ID</label>
+        <input type="text" id="dbId" placeholder="Database UUID" required>
+        
+        <div style="display: flex; gap: 10px;">
+            <button onclick="saveAndRedirect()" style="flex: 1;">위젯 생성 및 열기</button>
+            <button onclick="loadSavedConfig()" style="background: #6c757d;">저장된 설정 불러오기</button>
+        </div>
+        <button onclick="clearConfig()" style="margin-top: 10px; background: #dc3545; width: 100%;">설정 초기화 (모두 삭제)</button>
+    </div>
+
+    <script>
+        // 페이지 로드 시 저장된 설정 확인
+        window.onload = function() {
+            try {
+                const savedToken = localStorage.getItem('notion_token');
+                const savedDbId = localStorage.getItem('notion_db_id');
+                
+                if (savedToken && savedDbId) {
+                    const show = confirm('저장된 설정이 있습니다. 불러오시겠습니까?');
+                    if (show) {
+                        document.getElementById('token').value = savedToken;
+                        document.getElementById('dbId').value = savedDbId;
+                    }
+                }
+            } catch (e) {
+                console.log('LocalStorage 읽기 실패:', e);
+            }
+        };
+        
+        function saveAndRedirect() {
+            const token = document.getElementById('token').value.trim();
+            const dbId = document.getElementById('dbId').value.trim().replace(/-/g, ''); // 대시 제거
+
+            if (token && dbId) {
+                // 토큰과 DB ID를 URL의 해시(#) 부분에 인코딩하여 다음 페이지로 전달
+                const params = new URLSearchParams();
+                params.append('token', token);
+                params.append('db', dbId);
+                
+                // widget.html 파일이 현재 setup.html과 같은 디렉토리에 있다고 가정
+                window.location.href = 'widget.html#' + params.toString();
+            } else {
+                alert('토큰과 DB ID를 모두 입력해주세요.');
+            }
+        }
+        
+        function loadSavedConfig() {
+            try {
+                const savedToken = localStorage.getItem('notion_token');
+                const savedDbId = localStorage.getItem('notion_db_id');
+                
+                if (savedToken && savedDbId) {
+                    document.getElementById('token').value = savedToken;
+                    document.getElementById('dbId').value = savedDbId;
+                    alert('저장된 설정을 불러왔습니다.');
+                } else {
+                    alert('저장된 설정이 없습니다.');
+                }
+            } catch (e) {
+                alert('설정 불러오기 실패: ' + e.message);
+            }
+        }
+        
+        function clearConfig() {
+            if (confirm('정말 모든 설정을 삭제하시겠습니까?')) {
+                try {
+                    localStorage.removeItem('notion_token');
+                    localStorage.removeItem('notion_db_id');
+                    document.getElementById('token').value = '';
+                    document.getElementById('dbId').value = '';
+                    alert('설정이 초기화되었습니다.');
+                } catch (e) {
+                    alert('설정 초기화 실패: ' + e.message);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
